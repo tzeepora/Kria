@@ -14506,7 +14506,7 @@ function showEnd(title,lines){
    If left empty, the game works exactly as before (local-only) and the
    old export/import code panel still works.
    ============================================================ */
-window.CLOUD_SAVE_URL = "";
+window.CLOUD_SAVE_URL = "https://kria-game-accounts-default-rtdb.firebaseio.com";
 
 var LSU='cloudSave_username_v124';
 var LSB='cloudSave_localBackup_v124';
@@ -14659,10 +14659,39 @@ window.cloudSetNameV124=function(){
   var inp=ge('cloud-name-v124'); var n=(inp.value||'').trim().toLowerCase();
   if(!/^[a-z0-9\-_]{3,20}$/.test(n)){ status('⚠️ 3–20 chars: a-z, 0-9, - _'); return; }
   setUname(n);
+  updateNameTag();
   status('Name saved. Syncing...');
   syncNow(true);
 };
 
+function updateNameTag(){
+  var tag=ge('cloud-name-tag-v124');
+  if(!tag){
+    tag=document.createElement('div'); tag.id='cloud-name-tag-v124';
+    tag.style.cssText='position:fixed;top:4px;left:50%;transform:translateX(-50%);z-index:99980;display:none;padding:7px 18px;max-width:92vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;border-radius:999px;font-weight:1000;font-size:16px;border:3px solid #0277bd;box-shadow:0 3px 0 #01579b,0 6px 12px rgba(0,0,0,.18);cursor:pointer;font-family:inherit;';
+    tag.onclick=function(){ window.cloudOpenPanelV124(); };
+    document.body.appendChild(tag);
+  }
+  if(cfg()&&uname()){
+    tag.textContent='\u2601\uFE0F  '+uname()+'  \u2601\uFE0F';
+    tag.style.borderColor='#2e7d32'; tag.style.boxShadow='0 3px 0 #1b5e20,0 6px 12px rgba(0,0,0,.18)';
+    tag.style.background='linear-gradient(180deg,#e8f5e9,#c8e6c9)'; tag.style.color='#1b5e20';
+  }else{
+    tag.textContent='\u26A0\uFE0F Not synced \u2014 tap here / \u05DC\u05D0 \u05DE\u05E1\u05D5\u05E0\u05DB\u05E8\u05DF \u2014 \u05DC\u05D7\u05E6\u05D5 \u05DB\u05D0\u05DF';
+    tag.style.borderColor='#e65100'; tag.style.boxShadow='0 3px 0 #bf360c,0 6px 12px rgba(0,0,0,.18)';
+    tag.style.background='linear-gradient(180deg,#fff3e0,#ffe0b2)'; tag.style.color='#bf360c';
+  }
+  tagVisibility();
+}
+function tagVisibility(screenId){
+  var tag=ge('cloud-name-tag-v124'); if(!tag)return;
+  var id=screenId;
+  if(!id){
+    var act=document.querySelector('.screen.active'); id=act?act.id:'';
+  }
+  var show=(id==='profile-screen'||id==='setup-screen'||id==='home-screen');
+  tag.style.display=show?'block':'none';
+}
 function addButton(){
   if(ge('cloud-btn-v124'))return;
   var host=document.querySelector('#setup-screen')||document.body;
@@ -14677,12 +14706,14 @@ function addButton(){
     if(tabs&&tabs.parentNode)tabs.parentNode.insertBefore(b,tabs);
     else host.appendChild(b);
   }
+  updateNameTag();
 }
 function boot(){
   addButton();
+  updateNameTag();
   var sw=window.showScreen;
   if(typeof sw==='function'&&!sw.__cloudWrapped124){
-    window.showScreen=function(id){ var r=sw.apply(this,arguments); try{ if(id==='setup-screen')addButton(); }catch(e){} return r; };
+    window.showScreen=function(id){ var r=sw.apply(this,arguments); try{ if(id==='setup-screen')addButton(); updateNameTag(); tagVisibility(id); }catch(e){} return r; };
     window.showScreen.__cloudWrapped124=true;
   }
   if(cfg()){
