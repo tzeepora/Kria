@@ -14511,6 +14511,7 @@ window.CLOUD_SAVE_URL = "https://kria-game-accounts-default-rtdb.firebaseio.com"
 var LSU='cloudSave_username_v124';
 var LSB='cloudSave_localBackup_v124';
 var LST='cloudSave_lastPush_v124';
+var LSP='cloudSave_pin_v124';
 var PROFILE_KEYS=['hebMasterProfiles','profiles'];
 var EXTRA_KEYS=['hebMasterLastUser','lastUser','hebrewMasterLetterSet','selectedLetterSet','hebrewMasterBabyLang','hebrewMasterSfxOn'];
 var pushTimer=null, pollTimer=null, busy=false;
@@ -14548,6 +14549,7 @@ function snapshotLocal(){
   PROFILE_KEYS.forEach(function(k){ var v=jget(k); if(v)snap.profiles[k]=v; });
   EXTRA_KEYS.forEach(function(k){ try{var v=localStorage.getItem(k); if(v!=null)snap.extras[k]=v;}catch(e){} });
   snap.updatedAt=Date.now();
+  try{var p=localStorage.getItem(LSP); if(p)snap.pin=p;}catch(e){}
   return snap;
 }
 function applyMerged(merged){
@@ -14581,23 +14583,44 @@ function push(data,cb,errCb){
   .then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); try{localStorage.setItem(LST,String(Date.now()));}catch(e){} if(cb)cb(); })
   .catch(function(e){ if(errCb)errCb(e); });
 }
+function gameIsRunning(){
+  try{var g=document.getElementById('game-screen'); return !!(g&&g.classList.contains('active'));}catch(e){return false;}
+}
+function maybeReload(){
+  /* The app loads profiles into memory once at startup, so freshly pulled
+     cloud data is invisible (and gets overwritten by the next in-game save)
+     until the page reloads. Reload once, never during gameplay. */
+  if(gameIsRunning())return;
+  try{
+    var last=+(sessionStorage.getItem('cloudReload124')||0);
+    if(Date.now()-last<20000)return;
+    sessionStorage.setItem('cloudReload124',String(Date.now()));
+  }catch(e){}
+  badge('☁️ loading synced data... / טוען נתונים מהענן...',1800);
+  setTimeout(function(){location.reload();},900);
+}
 function syncNow(showUi){
   if(!cfg()||!uname())return;
   if(busy)return; busy=true;
   if(showUi)status('Syncing... / מסנכרן...');
   ensureBackupOnce();
+  var beforeLS='';
+  try{beforeLS=(localStorage.getItem('hebMasterProfiles')||'')+'|'+(localStorage.getItem('profiles')||'');}catch(e){}
   pull(function(remote){
     var local=snapshotLocal();
     var merged=remote?mergeNode(local,remote):local;
     merged.updatedAt=Date.now();
     applyMerged(merged);
-    /* refresh in-app UI if profile screens are visible */
+    var afterLS='';
+    try{afterLS=(localStorage.getItem('hebMasterProfiles')||'')+'|'+(localStorage.getItem('profiles')||'');}catch(e){}
+    var changed=(afterLS!==beforeLS);
     try{ if(typeof window.renderTabs==='function')window.renderTabs(); }catch(e){}
     push(merged,function(){
       busy=false;
       if(showUi)status('✅ Synced! / סונכרן בהצלחה\nName: '+uname());
       badge('☁️ saved');
-    },function(e){ busy=false; if(showUi)status('⚠️ Upload failed: '+e.message); });
+      if(changed)maybeReload();
+    },function(e){ busy=false; if(showUi)status('⚠️ Upload failed: '+e.message); if(changed)maybeReload(); });
   },function(e){ busy=false; if(showUi)status('⚠️ Could not reach cloud: '+e.message+'\nCheck internet / the URL in CLOUD_SAVE_URL.'); });
 }
 window.cloudSyncNowV124=function(){ syncNow(true); };
@@ -14630,6 +14653,8 @@ function buildPanel(){
       '<p>Pick a sync name (same name on every device = same progress). No password.<br>בחרו שם סנכרון — אותו שם בכל מכשיר = אותה התקדמות.</p>'+
       '<input id="cloud-name-v124" maxlength="20" placeholder="e.g. roni-2026" value="'+uname().replace(/"/g,'&quot;')+'">'+
       '<p style="font-size:12px;">3–20 chars: letters, numbers, - _ (lowercase)</p>'+
+      '<input id="cloud-pin-v124" maxlength="4" inputmode="numeric" placeholder="family code (4 digits) / קוד משפחתי" style="margin-top:8px;">'+
+      '<p style="font-size:12px;">🔒 The family code protects your name. New name: choose any 4 digits. Joining an existing name: type its code.<br>הקוד מגן על השם שלכם — שם חדש: בחרו 4 ספרות. הצטרפות לשם קיים: הקלידו את הקוד שלו.</p>'+
       '<div class="cloud-row-v124">'+
        '<button class="cloud-btn2-v124" onclick="window.cloudSetNameV124()">💾 Save name & sync</button>'+
        '<button class="cloud-btn2-v124" onclick="window.cloudSyncNowV124()">🔄 Sync now</button>'+
@@ -14658,10 +14683,41 @@ window.cloudClosePanelV124=function(){ var p=ge('cloud-panel-v124'); if(p)p.clas
 window.cloudSetNameV124=function(){
   var inp=ge('cloud-name-v124'); var n=(inp.value||'').trim().toLowerCase();
   if(!/^[a-z0-9\-_]{3,20}$/.test(n)){ status('⚠️ 3–20 chars: a-z, 0-9, - _'); return; }
-  setUname(n);
-  updateNameTag();
-  status('Name saved. Syncing...');
-  syncNow(true);
+  var pinInp=ge('cloud-pin-v124'); var pin=(pinInp&&pinInp.value||'').trim();
+  if(pin && !/^[0-9]{4}$/.test(pin)){ status('⚠️ The family code must be exactly 4 digits / הקוד חייב להיות 4 ספרות'); return; }
+  status('Checking name... / בודק שם...');
+  fetch(cfg()+'/hebrewMasterCloud/'+encodeURIComponent(n)+'.json',{method:'GET'})
+  .then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.json(); })
+  .then(function(rec){
+    function adopt(){
+      setUname(n);
+      if(pin){ try{localStorage.setItem(LSP,pin);}catch(e){} }
+      updateNameTag();
+      status('Name saved. Syncing... / השם נשמר, מסנכרן...');
+      syncNow(true);
+    }
+    if(!rec){ /* brand-new name — claim it */
+      adopt();
+      return;
+    }
+    /* name exists in the cloud */
+    if(rec.pin){
+      if(pin!==rec.pin){ status('🔒 This name is protected by a family code. Type its 4-digit code to join.\nהשם מוגן בקוד משפחתי — הקלידו את הקוד הנכון.'); return; }
+    }
+    var names=[];
+    try{
+      var hp=rec.profiles&&rec.profiles.hebMasterProfiles;
+      if(hp)for(var k in hp)names.push(k);
+    }catch(e){}
+    var msg='This name already has saved progress'+(names.length?' for: '+names.join(', '):'')+'.\nIs this YOUR family\u2019s account? Progress will be merged.\n\nהשם הזה כבר קיים'+(names.length?' עם: '+names.join(', '):'')+'.\nזה החשבון של המשפחה שלכם? ההתקדמות תאוחד.';
+    if(window.confirm(msg)){
+      if(rec.pin){ try{localStorage.setItem(LSP,rec.pin);}catch(e){} }
+      adopt();
+    }else{
+      status('Pick a different name then 🙂 / בחרו שם אחר');
+    }
+  })
+  .catch(function(e){ status('⚠️ Could not check the name: '+e.message); });
 };
 
 function updateNameTag(){
