@@ -15036,3 +15036,135 @@ if(typeof window.hardRefreshKeepUserData!=='function'){
 }
 })();
 </script>
+
+
+<!-- === V130: TIME-BONUS CLOCKS — 20 collectible +20s clocks scattered through each Jump level === -->
+<style id="time-clock-style-v130">
+.time-clock-v130{
+  position:absolute;width:46px;height:46px;display:flex;align-items:center;justify-content:center;
+  font-size:34px;z-index:6;pointer-events:none;
+  filter:drop-shadow(0 3px 4px rgba(0,0,0,.3));
+  animation:clockBob130 1.6s ease-in-out infinite;
+}
+@keyframes clockBob130{0%,100%{transform:translateY(0) rotate(-6deg);}50%{transform:translateY(-7px) rotate(6deg);}}
+.time-clock-v130.grabbed{animation:clockGrab130 .5s ease forwards;}
+@keyframes clockGrab130{0%{transform:scale(1);opacity:1;}100%{transform:scale(2.1) translateY(-34px);opacity:0;}}
+.time-pop-v130{
+  position:absolute;z-index:30;font-weight:1000;font-size:22px;color:#0a7d2c;pointer-events:none;
+  text-shadow:0 2px 0 #fff,0 0 6px rgba(255,255,255,.8);animation:timePop130 .9s ease forwards;white-space:nowrap;
+}
+@keyframes timePop130{0%{transform:translateY(0);opacity:0;}15%{opacity:1;}100%{transform:translateY(-46px);opacity:0;}}
+</style>
+<script id="time-clock-script-v130">
+(function(){
+'use strict';
+/* Adds collectible clocks to the three Jump games. Each clock gives +20 seconds.
+   20 clocks are scattered along each level. The clocks live INSIDE the same
+   scrolling world element as the letters, so they scroll automatically; we only
+   need to spawn them and watch for the player overlapping one. This is a
+   self-contained layer — it never touches the original engine code. */
+
+var BONUS=20;           /* seconds per clock */
+var COUNT=20;           /* clocks per level */
+var ENGINES=[
+  {pfx:'mario',  st:'__marioV55State'},
+  {pfx:'mariox', st:'__marioxV55State'},
+  {pfx:'marioz', st:'__mariozV55State'}
+];
+
+function ge(id){return document.getElementById(id);}
+function rectsOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+
+function activeEngine(){
+  try{
+    if(typeof game==='undefined'||!game)return null;
+    var m=game.mode;
+    if(m==='mario-letters-v55')      return ENGINES[0];
+    if(m==='mario-letters-expert-v69')return ENGINES[1];
+    if(m==='mario-letters-holes-v118')return ENGINES[2];
+  }catch(e){}
+  return null;
+}
+
+function spawnClocks(eng,state){
+  var world=ge(eng.pfx+'-world-v55'); if(!world||!state)return;
+  /* clear any leftover clocks from a previous run */
+  world.querySelectorAll('.time-clock-v130').forEach(function(e){e.remove();});
+  state.__clocks=[];
+  var W=state.worldW||3000, groundY=state.groundY||400;
+  /* spread evenly across the world (skip the very start & the far-right door zone) */
+  var startX=420, endX=Math.max(startX+200, W-520);
+  var span=endX-startX;
+  for(var i=0;i<COUNT;i++){
+    var x=startX + span*(i/(COUNT-1)) + (Math.random()*60-30);
+    x=Math.max(360,Math.min(W-360,x));
+    /* vary height: some on the ground line, some up where platforms/letters live */
+    var tier=i%3;
+    var y;
+    if(tier===0)      y=groundY-58;                       /* low, easy to grab while running */
+    else if(tier===1) y=groundY-150-Math.random()*40;     /* mid */
+    else              y=groundY-240-Math.random()*60;     /* high, near upper platforms */
+    var el=document.createElement('div');
+    el.className='time-clock-v130';
+    el.textContent='⏰';
+    el.style.left=x+'px'; el.style.top=y+'px';
+    el.style.animationDelay=(-(i%8)*0.2)+'s';
+    world.appendChild(el);
+    state.__clocks.push({x:x,y:y,w:46,h:46,el:el,got:false});
+  }
+  state.__clockLevel=state.level;
+}
+
+function grant(eng,state,c){
+  if(c.got)return; c.got=true;
+  try{
+    if(typeof game!=='undefined'&&game){
+      game.time=(game.time||0)+BONUS;
+      /* let the clock also lift the timer ceiling so the bar can't read >100% */
+      if(game.marioTimeLimit && game.time>game.marioTimeLimit) game.marioTimeLimit=game.time;
+      var bar=ge('timer-bar'); if(bar)bar.style.width=Math.max(0,Math.min(100,(game.time/(game.marioTimeLimit||game.time))*100))+'%';
+    }
+  }catch(e){}
+  /* feedback: pop "+20s" and a little chime */
+  try{
+    var world=ge(eng.pfx+'-world-v55');
+    if(world){
+      var pop=document.createElement('div');
+      pop.className='time-pop-v130'; pop.textContent='+'+BONUS+'s';
+      pop.style.left=c.x+'px'; pop.style.top=(c.y-6)+'px';
+      world.appendChild(pop);
+      setTimeout(function(){try{pop.remove();}catch(e){}},900);
+    }
+  }catch(e){}
+  try{ if(c.el){ c.el.classList.add('grabbed'); setTimeout(function(){try{c.el.remove();}catch(e){}},480); } }catch(e){}
+  try{ if(typeof playSfx==='function') playSfx('correct'); }catch(e){}
+}
+
+function tick(){
+  try{
+    var eng=activeEngine();
+    if(eng){
+      var state=window[eng.st];
+      if(state && !(typeof game!=='undefined'&&game&&game.finished)){
+        /* (re)spawn when a new level/world starts */
+        if(state.__clockLevel!==state.level || !state.__clocks){
+          spawnClocks(eng,state);
+        }
+        /* player rectangle in world coordinates (same space the engine uses) */
+        var px=state.playerX, py=state.playerY;
+        if(px!=null&&py!=null){
+          var pr={x:px,y:py,w:54,h:70};
+          var arr=state.__clocks||[];
+          for(var i=0;i<arr.length;i++){
+            var c=arr[i]; if(c.got)continue;
+            if(rectsOverlap(pr,{x:c.x+4,y:c.y+4,w:c.w-8,h:c.h-8})) grant(eng,state,c);
+          }
+        }
+      }
+    }
+  }catch(e){}
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+})();
+</script>
